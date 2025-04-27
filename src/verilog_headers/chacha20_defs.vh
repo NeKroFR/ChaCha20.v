@@ -2,10 +2,10 @@
 `define CHACHA20_DEFS_VH
 
 // Constants for ChaCha20
-`define CHACHA20_CONST_0 32'h61707865 // "expa"
-`define CHACHA20_CONST_1 32'h3320646e // "nd 3"
-`define CHACHA20_CONST_2 32'h79622d32 // "2-by"
-`define CHACHA20_CONST_3 32'h6b206574 // "te k"
+`define CHACHA20_CONST_0 32'h61707865
+`define CHACHA20_CONST_1 32'h3320646e
+`define CHACHA20_CONST_2 32'h79622d32
+`define CHACHA20_CONST_3 32'h6b206574
 
 // Block sizes
 `define CHACHA20_BLOCK_SIZE_BITS 512
