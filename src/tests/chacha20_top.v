@@ -2,9 +2,9 @@
 module chacha20_top (
     input wire clk,
     input wire rst_n,
-    input wire [7:0] data_in,
+    input wire [31:0] data_in,
     input wire data_valid,
-    output wire [7:0] data_out,
+    output wire [31:0] data_out,
     output wire busy
 );
     // Parameters
@@ -28,11 +28,11 @@ module chacha20_top (
     // Internal signals
     reg [1:0] state;
     reg start_encrypt;
-    reg [7:0] plaintext_byte;
+    reg [31:0] plaintext_word;
     reg plaintext_valid;
     reg plaintext_last;
     wire plaintext_ready;
-    wire [7:0] ciphertext_byte;
+    wire [31:0] ciphertext_word;
     wire ciphertext_valid;
     wire ciphertext_last;
     reg ciphertext_ready;
@@ -46,11 +46,11 @@ module chacha20_top (
         .key(DEFAULT_KEY),
         .counter(DEFAULT_COUNTER),
         .nonce(DEFAULT_NONCE),
-        .plaintext_data(plaintext_byte),
+        .plaintext_data(plaintext_word),
         .plaintext_valid(plaintext_valid),
         .plaintext_last(plaintext_last),
         .plaintext_ready(plaintext_ready),
-        .ciphertext_data(ciphertext_byte),
+        .ciphertext_data(ciphertext_word),
         .ciphertext_valid(ciphertext_valid),
         .ciphertext_last(ciphertext_last),
         .ciphertext_ready(ciphertext_ready),
@@ -58,7 +58,7 @@ module chacha20_top (
     );
     
     // Output assignments
-    assign data_out = ciphertext_byte;
+    assign data_out = ciphertext_word;
     assign busy = (state != IDLE);
     
     // Encryption state machine 
@@ -66,7 +66,7 @@ module chacha20_top (
         if (!rst_n) begin
             state <= IDLE;
             start_encrypt <= 1'b0;
-            plaintext_byte <= 8'h00;
+            plaintext_word <= 32'h0;
             plaintext_valid <= 1'b0;
             plaintext_last <= 1'b0;
             ciphertext_ready <= 1'b1;
@@ -75,7 +75,7 @@ module chacha20_top (
                 IDLE: begin
                     if (data_valid) begin
                         start_encrypt <= 1'b1;
-                        plaintext_byte <= data_in;
+                        plaintext_word <= data_in;
                         plaintext_valid <= 1'b1;
                         plaintext_last <= 1'b1;
                         state <= ENCRYPTING;

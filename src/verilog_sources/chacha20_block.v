@@ -1,403 +1,322 @@
 module chacha20_block (
-    input clk,                          // Clock signal
-    input rst_n,                        // Active low reset
-    input start,                        // Start signal
-    input [255:0] key,                  // 32 bytes key
-    input [31:0] counter,               // 4 bytes counter
-    input [95:0] nonce,                 // 12 bytes nonce
-    output reg [511:0] keystream_block, // 64 bytes keystream block
-    output reg done
+    input clk,                              // Clock signal
+    input rst_n,                            // Active low reset
+    input start,                            // Start signal
+    input [255:0] key,                      // 32 bytes key
+    input [31:0] counter,                   // 4 bytes counter
+    input [95:0] nonce,                     // 12 bytes nonce
+    input [1:0] parallel_blocks,            // Number of blocks to process in parallel (0=1, 1=2, 2=4)
+    output reg [2047:0] keystream_blocks,   // Up to 4 keystream blocks (4 x 512 bits)
+    output reg done                         // Operation complete
 );
     // Define constants
-    localparam [31:0] CONST_0 = 32'h61707865; // "expa"
+    localparam [31:0] CONST_0 = 32'h61707865;
     localparam [31:0] CONST_1 = 32'h3320646e; // "nd 3"
     localparam [31:0] CONST_2 = 32'h79622d32; // "2-by"
     localparam [31:0] CONST_3 = 32'h6b206574; // "te k"
 
     // Define states
-    localparam IDLE = 2'b00;
-    localparam PROCESSING = 2'b01;
-    localparam FINALIZE = 2'b10;
-    reg [1:0] state;
-
+    localparam IDLE = 3'b000;
+    localparam INIT = 3'b001;
+    localparam ROUNDS_1_TO_10 = 3'b010;   // First 10 rounds (5 double-rounds)
+    localparam ROUNDS_11_TO_20 = 3'b011;  // Second 10 rounds (5 double-rounds)
+    localparam FINALIZE = 3'b100;         // Add initial state to working state
     
-    // Pipeline control
-    reg [4:0] round_counter;
-    reg round_type; // 0 = column round, 1 = diagonal round
+    reg [2:0] state;
+    reg [4:0] double_round_counter;     // Up to 10 double rounds (20 rounds)
+    reg process_column_round;           // 0 for column round, 1 for diagonal round
     
-    // Track pipeline progress
-    reg processing_active;
-    reg [5:0] pipeline_position;
+    // Number of parallel blocks to process (1, 2, or 4)
+    reg [3:0] num_blocks;
     
-    // State arrays (16 x 32-bits words)
-    reg [31:0] initial_state [0:15];
-    reg [31:0] working_state [0:15];
+    // State for up to 4 parallel blocks
+    reg [31:0] initial_state [0:3][0:15];
+    reg [31:0] working_state [0:3][0:15];
     
-    // Column Round Quarter Round Instances (4 parallel units)
-    // QR1: State[0, 4, 8, 12]
-    wire [31:0] col_qr0_a_in, col_qr0_b_in, col_qr0_c_in, col_qr0_d_in;
-    wire [31:0] col_qr0_a_out, col_qr0_b_out, col_qr0_c_out, col_qr0_d_out;
+    // Pipeline tracking
+    reg [1:0] pipeline_stage;
+    localparam PIPELINE_DELAY = 2; // 2 cycles for QR processing
     
-    // QR2: State[1, 5, 9, 13]
-    wire [31:0] col_qr1_a_in, col_qr1_b_in, col_qr1_c_in, col_qr1_d_in;
-    wire [31:0] col_qr1_a_out, col_qr1_b_out, col_qr1_c_out, col_qr1_d_out;
+    // Array-based connection wires for quarter rounds
+    // Use 2D arrays for inputs and outputs: [qr_index][a/b/c/d]
+    wire [31:0] col_qr_in [0:3][0:3];   // [qr_module_index][a/b/c/d]
+    wire [31:0] col_qr_out [0:3][0:3];  // [qr_module_index][a/b/c/d]
+    wire [31:0] diag_qr_in [0:3][0:3];  // [qr_module_index][a/b/c/d]
+    wire [31:0] diag_qr_out [0:3][0:3]; // [qr_module_index][a/b/c/d]
     
-    // QR3: State[2, 6, 10, 14]
-    wire [31:0] col_qr2_a_in, col_qr2_b_in, col_qr2_c_in, col_qr2_d_in;
-    wire [31:0] col_qr2_a_out, col_qr2_b_out, col_qr2_c_out, col_qr2_d_out;
+    // Define lookup tables for column and diagonal indices
+    // These represent the state indices that feed into each quarter round
+    localparam integer COL_IDX [0:3][0:3] = '{
+        '{0, 4, 8, 12},     // QR0 inputs come from these state indices
+        '{1, 5, 9, 13},     // QR1 inputs come from these state indices
+        '{2, 6, 10, 14},    // QR2 inputs come from these state indices
+        '{3, 7, 11, 15}     // QR3 inputs come from these state indices
+    };
     
-    // QR4: State[3, 7, 11, 15]
-    wire [31:0] col_qr3_a_in, col_qr3_b_in, col_qr3_c_in, col_qr3_d_in;
-    wire [31:0] col_qr3_a_out, col_qr3_b_out, col_qr3_c_out, col_qr3_d_out;
-
-
-    // Column round input connections
-    assign col_qr0_a_in = working_state[0];
-    assign col_qr0_b_in = working_state[4];
-    assign col_qr0_c_in = working_state[8];
-    assign col_qr0_d_in = working_state[12];
+    localparam integer DIAG_IDX [0:3][0:3] = '{
+        '{0, 5, 10, 15},    // QR0 inputs come from these state indices
+        '{1, 6, 11, 12},    // QR1 inputs come from these state indices
+        '{2, 7, 8, 13},     // QR2 inputs come from these state indices
+        '{3, 4, 9, 14}      // QR3 inputs come from these state indices
+    };
     
-    assign col_qr1_a_in = working_state[1];
-    assign col_qr1_b_in = working_state[5];
-    assign col_qr1_c_in = working_state[9];
-    assign col_qr1_d_in = working_state[13];
+    // Generate column round connections using nested loops
+    genvar i, j;
+    generate
+        for (i = 0; i < 4; i = i + 1) begin : col_qr_inputs
+            for (j = 0; j < 4; j = j + 1) begin : col_inputs
+                assign col_qr_in[i][j] = working_state[0][COL_IDX[i][j]];
+            end
+        end
     
-    assign col_qr2_a_in = working_state[2];
-    assign col_qr2_b_in = working_state[6];
-    assign col_qr2_c_in = working_state[10];
-    assign col_qr2_d_in = working_state[14];
+        // Generate diagonal round connections using nested loops
+        for (i = 0; i < 4; i = i + 1) begin : diag_qr_inputs
+            for (j = 0; j < 4; j = j + 1) begin : diag_inputs
+                assign diag_qr_in[i][j] = working_state[0][DIAG_IDX[i][j]];
+            end
+        end
+    endgenerate
     
-    assign col_qr3_a_in = working_state[3];
-    assign col_qr3_b_in = working_state[7];
-    assign col_qr3_c_in = working_state[11];
-    assign col_qr3_d_in = working_state[15];
-
-
-    // Diagonal Round Quarter Round Instances (4 parallel units)
-    // QR1: State[0, 5, 10, 15]
-    wire [31:0] diag_qr0_a_in, diag_qr0_b_in, diag_qr0_c_in, diag_qr0_d_in;
-    wire [31:0] diag_qr0_a_out, diag_qr0_b_out, diag_qr0_c_out, diag_qr0_d_out;
+    // Instantiate quarter round modules using generate statement
+    genvar qr_idx;
+    generate
+        for (qr_idx = 0; qr_idx < 4; qr_idx = qr_idx + 1) begin : qr_modules
+            quarter_round col_qr (
+                .clk(clk),
+                .rst_n(rst_n),
+                .a_in(col_qr_in[qr_idx][0]),
+                .b_in(col_qr_in[qr_idx][1]),
+                .c_in(col_qr_in[qr_idx][2]),
+                .d_in(col_qr_in[qr_idx][3]),
+                .a_out(col_qr_out[qr_idx][0]),
+                .b_out(col_qr_out[qr_idx][1]),
+                .c_out(col_qr_out[qr_idx][2]),
+                .d_out(col_qr_out[qr_idx][3])
+            );
+            
+            quarter_round diag_qr (
+                .clk(clk),
+                .rst_n(rst_n),
+                .a_in(diag_qr_in[qr_idx][0]),
+                .b_in(diag_qr_in[qr_idx][1]),
+                .c_in(diag_qr_in[qr_idx][2]),
+                .d_in(diag_qr_in[qr_idx][3]),
+                .a_out(diag_qr_out[qr_idx][0]),
+                .b_out(diag_qr_out[qr_idx][1]),
+                .c_out(diag_qr_out[qr_idx][2]),
+                .d_out(diag_qr_out[qr_idx][3])
+            );
+        end
+    endgenerate
     
-    // QR2: State[1, 6, 11, 12]
-    wire [31:0] diag_qr1_a_in, diag_qr1_b_in, diag_qr1_c_in, diag_qr1_d_in;
-    wire [31:0] diag_qr1_a_out, diag_qr1_b_out, diag_qr1_c_out, diag_qr1_d_out;
+    // Define mappings between column QR outputs and state matrix indices
+    localparam integer COL_OUT_MAP [0:3][0:3] = '{
+        '{0, 4, 8, 12},    // QR0 output goes to these state indices
+        '{1, 5, 9, 13},    // QR1 output goes to these state indices
+        '{2, 6, 10, 14},   // QR2 output goes to these state indices
+        '{3, 7, 11, 15}    // QR3 output goes to these state indices
+    };
     
-    // QR3: State[2, 7, 8, 13]
-    wire [31:0] diag_qr2_a_in, diag_qr2_b_in, diag_qr2_c_in, diag_qr2_d_in;
-    wire [31:0] diag_qr2_a_out, diag_qr2_b_out, diag_qr2_c_out, diag_qr2_d_out;
+    localparam integer DIAG_OUT_MAP [0:3][0:3] = '{
+        '{0, 5, 10, 15},   // QR0 output goes to these state indices
+        '{1, 6, 11, 12},   // QR1 output goes to these state indices
+        '{2, 7, 8, 13},    // QR2 output goes to these state indices
+        '{3, 4, 9, 14}     // QR3 output goes to these state indices
+    };
     
-    // QR4: State[3, 4, 9, 14]
-    wire [31:0] diag_qr3_a_in, diag_qr3_b_in, diag_qr3_c_in, diag_qr3_d_in;
-    wire [31:0] diag_qr3_a_out, diag_qr3_b_out, diag_qr3_c_out, diag_qr3_d_out;
-    
-
-    // Diagonal round input connections
-    assign diag_qr0_a_in = working_state[0];
-    assign diag_qr0_b_in = working_state[5];
-    assign diag_qr0_c_in = working_state[10];
-    assign diag_qr0_d_in = working_state[15];
-    
-    assign diag_qr1_a_in = working_state[1];
-    assign diag_qr1_b_in = working_state[6];
-    assign diag_qr1_c_in = working_state[11];
-    assign diag_qr1_d_in = working_state[12];
-    
-    assign diag_qr2_a_in = working_state[2];
-    assign diag_qr2_b_in = working_state[7];
-    assign diag_qr2_c_in = working_state[8];
-    assign diag_qr2_d_in = working_state[13];
-    
-    assign diag_qr3_a_in = working_state[3];
-    assign diag_qr3_b_in = working_state[4];
-    assign diag_qr3_c_in = working_state[9];
-    assign diag_qr3_d_in = working_state[14];
-    
-
-    // Output selection based on round type
-    wire [31:0] qr0_a_out = round_type ? diag_qr0_a_out : col_qr0_a_out;
-    wire [31:0] qr0_b_out = round_type ? diag_qr0_b_out : col_qr0_b_out;
-    wire [31:0] qr0_c_out = round_type ? diag_qr0_c_out : col_qr0_c_out;
-    wire [31:0] qr0_d_out = round_type ? diag_qr0_d_out : col_qr0_d_out;
-    
-    wire [31:0] qr1_a_out = round_type ? diag_qr1_a_out : col_qr1_a_out;
-    wire [31:0] qr1_b_out = round_type ? diag_qr1_b_out : col_qr1_b_out;
-    wire [31:0] qr1_c_out = round_type ? diag_qr1_c_out : col_qr1_c_out;
-    wire [31:0] qr1_d_out = round_type ? diag_qr1_d_out : col_qr1_d_out;
-    
-    wire [31:0] qr2_a_out = round_type ? diag_qr2_a_out : col_qr2_a_out;
-    wire [31:0] qr2_b_out = round_type ? diag_qr2_b_out : col_qr2_b_out;
-    wire [31:0] qr2_c_out = round_type ? diag_qr2_c_out : col_qr2_c_out;
-    wire [31:0] qr2_d_out = round_type ? diag_qr2_d_out : col_qr2_d_out;
-    
-    wire [31:0] qr3_a_out = round_type ? diag_qr3_a_out : col_qr3_a_out;
-    wire [31:0] qr3_b_out = round_type ? diag_qr3_b_out : col_qr3_b_out;
-    wire [31:0] qr3_c_out = round_type ? diag_qr3_c_out : col_qr3_c_out;
-    wire [31:0] qr3_d_out = round_type ? diag_qr3_d_out : col_qr3_d_out;
-    
-    // Instantiate column round quarter round modules
-    quarter_round col_qr0 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .a_in(col_qr0_a_in),
-        .b_in(col_qr0_b_in),
-        .c_in(col_qr0_c_in),
-        .d_in(col_qr0_d_in),
-        .a_out(col_qr0_a_out),
-        .b_out(col_qr0_b_out),
-        .c_out(col_qr0_c_out),
-        .d_out(col_qr0_d_out)
-    );
-    
-    quarter_round col_qr1 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .a_in(col_qr1_a_in),
-        .b_in(col_qr1_b_in),
-        .c_in(col_qr1_c_in),
-        .d_in(col_qr1_d_in),
-        .a_out(col_qr1_a_out),
-        .b_out(col_qr1_b_out),
-        .c_out(col_qr1_c_out),
-        .d_out(col_qr1_d_out)
-    );
-    
-    quarter_round col_qr2 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .a_in(col_qr2_a_in),
-        .b_in(col_qr2_b_in),
-        .c_in(col_qr2_c_in),
-        .d_in(col_qr2_d_in),
-        .a_out(col_qr2_a_out),
-        .b_out(col_qr2_b_out),
-        .c_out(col_qr2_c_out),
-        .d_out(col_qr2_d_out)
-    );
-    
-    quarter_round col_qr3 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .a_in(col_qr3_a_in),
-        .b_in(col_qr3_b_in),
-        .c_in(col_qr3_c_in),
-        .d_in(col_qr3_d_in),
-        .a_out(col_qr3_a_out),
-        .b_out(col_qr3_b_out),
-        .c_out(col_qr3_c_out),
-        .d_out(col_qr3_d_out)
-    );
-    
-    // Instantiate diagonal round quarter round modules
-    quarter_round diag_qr0 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .a_in(diag_qr0_a_in),
-        .b_in(diag_qr0_b_in),
-        .c_in(diag_qr0_c_in),
-        .d_in(diag_qr0_d_in),
-        .a_out(diag_qr0_a_out),
-        .b_out(diag_qr0_b_out),
-        .c_out(diag_qr0_c_out),
-        .d_out(diag_qr0_d_out)
-    );
-    
-    quarter_round diag_qr1 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .a_in(diag_qr1_a_in),
-        .b_in(diag_qr1_b_in),
-        .c_in(diag_qr1_c_in),
-        .d_in(diag_qr1_d_in),
-        .a_out(diag_qr1_a_out),
-        .b_out(diag_qr1_b_out),
-        .c_out(diag_qr1_c_out),
-        .d_out(diag_qr1_d_out)
-    );
-    
-    quarter_round diag_qr2 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .a_in(diag_qr2_a_in),
-        .b_in(diag_qr2_b_in),
-        .c_in(diag_qr2_c_in),
-        .d_in(diag_qr2_d_in),
-        .a_out(diag_qr2_a_out),
-        .b_out(diag_qr2_b_out),
-        .c_out(diag_qr2_c_out),
-        .d_out(diag_qr2_d_out)
-    );
-    
-    quarter_round diag_qr3 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .a_in(diag_qr3_a_in),
-        .b_in(diag_qr3_b_in),
-        .c_in(diag_qr3_c_in),
-        .d_in(diag_qr3_d_in),
-        .a_out(diag_qr3_a_out),
-        .b_out(diag_qr3_b_out),
-        .c_out(diag_qr3_c_out),
-        .d_out(diag_qr3_d_out)
-    );
-    
-    // Pipeline delay calculation (2 cycles for QR)
-    localparam QR_DELAY = 2;
-    
-    // State machine for ChaCha20 block function
+    // Main state machine
     always @(posedge clk or negedge rst_n) begin
+        // Declare all variables at the beginning of the procedural block
+        integer i, qr, out_idx;
+        
         if (!rst_n) begin
             state <= IDLE;
             done <= 1'b0;
-            round_counter <= 5'd0;
-            round_type <= 1'b0; // Column round
-            processing_active <= 1'b0;
-            pipeline_position <= 6'd0;
+            double_round_counter <= 5'd0;
+            process_column_round <= 1'b1;
+            pipeline_stage <= 2'd0;
+            num_blocks <= 4'd1;
         end else begin
             case (state)
                 IDLE: begin
                     done <= 1'b0;
                     
                     if (start) begin
-                        // Initialize state
-                        initial_state[0] <= CONST_0;
-                        initial_state[1] <= CONST_1;
-                        initial_state[2] <= CONST_2;
-                        initial_state[3] <= CONST_3;
+                        // Determine number of blocks to process
+                        case (parallel_blocks)
+                            2'b00: num_blocks <= 4'd1;
+                            2'b01: num_blocks <= 4'd2;
+                            2'b10: num_blocks <= 4'd4;
+                            default: num_blocks <= 4'd1;
+                        endcase
                         
-                        // Key (8 words)
-                        initial_state[4] <= {key[7:0], key[15:8], key[23:16], key[31:24]};
-                        initial_state[5] <= {key[39:32], key[47:40], key[55:48], key[63:56]};
-                        initial_state[6] <= {key[71:64], key[79:72], key[87:80], key[95:88]};
-                        initial_state[7] <= {key[103:96], key[111:104], key[119:112], key[127:120]};
-                        initial_state[8] <= {key[135:128], key[143:136], key[151:144], key[159:152]};
-                        initial_state[9] <= {key[167:160], key[175:168], key[183:176], key[191:184]};
-                        initial_state[10] <= {key[199:192], key[207:200], key[215:208], key[223:216]};
-                        initial_state[11] <= {key[231:224], key[239:232], key[247:240], key[255:248]};
-                        
-                        // Counter (1 word)
-                        initial_state[12] <= counter;
-                        
-                        // Nonce (3 words)
-                        initial_state[13] <= {nonce[7:0], nonce[15:8], nonce[23:16], nonce[31:24]};
-                        initial_state[14] <= {nonce[39:32], nonce[47:40], nonce[55:48], nonce[63:56]};
-                        initial_state[15] <= {nonce[71:64], nonce[79:72], nonce[87:80], nonce[95:88]};
-                        
-                        // Copy initial state to working state
-                        working_state[0] <= CONST_0;
-                        working_state[1] <= CONST_1;
-                        working_state[2] <= CONST_2;
-                        working_state[3] <= CONST_3;
-                        working_state[4] <= {key[7:0], key[15:8], key[23:16], key[31:24]};
-                        working_state[5] <= {key[39:32], key[47:40], key[55:48], key[63:56]};
-                        working_state[6] <= {key[71:64], key[79:72], key[87:80], key[95:88]};
-                        working_state[7] <= {key[103:96], key[111:104], key[119:112], key[127:120]};
-                        working_state[8] <= {key[135:128], key[143:136], key[151:144], key[159:152]};
-                        working_state[9] <= {key[167:160], key[175:168], key[183:176], key[191:184]};
-                        working_state[10] <= {key[199:192], key[207:200], key[215:208], key[223:216]};
-                        working_state[11] <= {key[231:224], key[239:232], key[247:240], key[255:248]};
-                        working_state[12] <= counter;
-                        working_state[13] <= {nonce[7:0], nonce[15:8], nonce[23:16], nonce[31:24]};
-                        working_state[14] <= {nonce[39:32], nonce[47:40], nonce[55:48], nonce[63:56]};
-                        working_state[15] <= {nonce[71:64], nonce[79:72], nonce[87:80], nonce[95:88]};
-                        
-                        round_counter <= 5'd0;
-                        round_type <= 1'b0; // Column round
-                        processing_active <= 1'b1;
-                        pipeline_position <= 6'd0;
-                        state <= PROCESSING;
+                        state <= INIT;
                     end
                 end
                 
-                PROCESSING: begin
-                    if (processing_active) begin
-                        pipeline_position <= pipeline_position + 6'd1;
-
-                        if (pipeline_position >= QR_DELAY) begin
-                            if (round_type == 1'b0) begin // Column round results
-                                working_state[0] <= qr0_a_out;
-                                working_state[4] <= qr0_b_out;
-                                working_state[8] <= qr0_c_out;
-                                working_state[12] <= qr0_d_out;
-                                
-                                working_state[1] <= qr1_a_out;
-                                working_state[5] <= qr1_b_out;
-                                working_state[9] <= qr1_c_out;
-                                working_state[13] <= qr1_d_out;
-                                
-                                working_state[2] <= qr2_a_out;
-                                working_state[6] <= qr2_b_out;
-                                working_state[10] <= qr2_c_out;
-                                working_state[14] <= qr2_d_out;
-                                
-                                working_state[3] <= qr3_a_out;
-                                working_state[7] <= qr3_b_out;
-                                working_state[11] <= qr3_c_out;
-                                working_state[15] <= qr3_d_out;
+                INIT: begin
+                    // Initialize state for all blocks in parallel
+                    for (i = 0; i < 4; i = i + 1) begin
+                        if (i < num_blocks) begin
+                            // Initialize constants
+                            initial_state[i][0] <= CONST_0;
+                            initial_state[i][1] <= CONST_1;
+                            initial_state[i][2] <= CONST_2;
+                            initial_state[i][3] <= CONST_3;
+                            
+                            // Initialize key (8 words)
+                            initial_state[i][4] <= {key[7:0], key[15:8], key[23:16], key[31:24]};
+                            initial_state[i][5] <= {key[39:32], key[47:40], key[55:48], key[63:56]};
+                            initial_state[i][6] <= {key[71:64], key[79:72], key[87:80], key[95:88]};
+                            initial_state[i][7] <= {key[103:96], key[111:104], key[119:112], key[127:120]};
+                            initial_state[i][8] <= {key[135:128], key[143:136], key[151:144], key[159:152]};
+                            initial_state[i][9] <= {key[167:160], key[175:168], key[183:176], key[191:184]};
+                            initial_state[i][10] <= {key[199:192], key[207:200], key[215:208], key[223:216]};
+                            initial_state[i][11] <= {key[231:224], key[239:232], key[247:240], key[255:248]};
+                            
+                            // Initialize counter (incremented for each block)
+                            initial_state[i][12] <= counter + i;
+                            
+                            // Initialize nonce (3 words)
+                            initial_state[i][13] <= {nonce[7:0], nonce[15:8], nonce[23:16], nonce[31:24]};
+                            initial_state[i][14] <= {nonce[39:32], nonce[47:40], nonce[55:48], nonce[63:56]};
+                            initial_state[i][15] <= {nonce[71:64], nonce[79:72], nonce[87:80], nonce[95:88]};
+                            
+                            // Copy to working state
+                            working_state[i][0] <= CONST_0;
+                            working_state[i][1] <= CONST_1;
+                            working_state[i][2] <= CONST_2;
+                            working_state[i][3] <= CONST_3;
+                            working_state[i][4] <= {key[7:0], key[15:8], key[23:16], key[31:24]};
+                            working_state[i][5] <= {key[39:32], key[47:40], key[55:48], key[63:56]};
+                            working_state[i][6] <= {key[71:64], key[79:72], key[87:80], key[95:88]};
+                            working_state[i][7] <= {key[103:96], key[111:104], key[119:112], key[127:120]};
+                            working_state[i][8] <= {key[135:128], key[143:136], key[151:144], key[159:152]};
+                            working_state[i][9] <= {key[167:160], key[175:168], key[183:176], key[191:184]};
+                            working_state[i][10] <= {key[199:192], key[207:200], key[215:208], key[223:216]};
+                            working_state[i][11] <= {key[231:224], key[239:232], key[247:240], key[255:248]};
+                            working_state[i][12] <= counter + i;
+                            working_state[i][13] <= {nonce[7:0], nonce[15:8], nonce[23:16], nonce[31:24]};
+                            working_state[i][14] <= {nonce[39:32], nonce[47:40], nonce[55:48], nonce[63:56]};
+                            working_state[i][15] <= {nonce[71:64], nonce[79:72], nonce[87:80], nonce[95:88]};
+                        end
+                    end
+                    
+                    // Setup for first half of rounds
+                    double_round_counter <= 5'd0;
+                    process_column_round <= 1'b1;
+                    pipeline_stage <= 2'd0;
+                    state <= ROUNDS_1_TO_10;
+                end
+                
+                ROUNDS_1_TO_10: begin
+                    pipeline_stage <= pipeline_stage + 1;
+                    
+                    // Wait for pipeline stages to complete
+                    if (pipeline_stage >= PIPELINE_DELAY) begin
+                        pipeline_stage <= 2'd0;
+                        
+                        // Update block 0 using array-based indexing
+                        if (process_column_round) begin
+                            // Column round results
+                            for (qr = 0; qr < 4; qr = qr + 1) begin
+                                for (out_idx = 0; out_idx < 4; out_idx = out_idx + 1) begin
+                                    working_state[0][COL_OUT_MAP[qr][out_idx]] <= col_qr_out[qr][out_idx];
+                                end
                             end
-                            else begin // Diagonal round results
-                                working_state[0] <= qr0_a_out;
-                                working_state[5] <= qr0_b_out;
-                                working_state[10] <= qr0_c_out;
-                                working_state[15] <= qr0_d_out;
-                                
-                                working_state[1] <= qr1_a_out;
-                                working_state[6] <= qr1_b_out;
-                                working_state[11] <= qr1_c_out;
-                                working_state[12] <= qr1_d_out;
-                                
-                                working_state[2] <= qr2_a_out;
-                                working_state[7] <= qr2_b_out;
-                                working_state[8] <= qr2_c_out;
-                                working_state[13] <= qr2_d_out;
-                                
-                                working_state[3] <= qr3_a_out;
-                                working_state[4] <= qr3_b_out;
-                                working_state[9] <= qr3_c_out;
-                                working_state[14] <= qr3_d_out;
-                                
-                                round_counter <= round_counter + 5'd1;
+                        end else begin
+                            // Diagonal round results
+                            for (qr = 0; qr < 4; qr = qr + 1) begin
+                                for (out_idx = 0; out_idx < 4; out_idx = out_idx + 1) begin
+                                    working_state[0][DIAG_OUT_MAP[qr][out_idx]] <= diag_qr_out[qr][out_idx];
+                                end
                             end
                             
-                            // Toggle round type for next iteration
-                            round_type <= ~round_type;
-                            
-                            // Reset pipeline position for next round
-                            pipeline_position <= 6'd0;
-                            
-                            // Check if we've completed all rounds
-                            if (round_counter == 5'd9 && round_type == 1'b1) begin
-                                processing_active <= 1'b0;
-                                state <= FINALIZE;
+                            // Increment double round counter after diagonal round
+                            double_round_counter <= double_round_counter + 5'd1;
+                        end
+                        
+                        // Toggle between column and diagonal rounds
+                        process_column_round <= ~process_column_round;
+                        
+                        // Move to second half after 5 double rounds (10 rounds total)
+                        if (double_round_counter == 5'd5 && !process_column_round) begin
+                            state <= ROUNDS_11_TO_20;
+                            double_round_counter <= 5'd0;
+                        end
+                    end
+                end
+                
+                ROUNDS_11_TO_20: begin
+                    pipeline_stage <= pipeline_stage + 1;
+                    
+                    // Wait for pipeline stages to complete
+                    if (pipeline_stage >= PIPELINE_DELAY) begin
+                        pipeline_stage <= 2'd0;
+                        
+                        // Update block 0 using array-based indexing (same as ROUNDS_1_TO_10)
+                        if (process_column_round) begin
+                            // Column round results
+                            for (qr = 0; qr < 4; qr = qr + 1) begin
+                                for (out_idx = 0; out_idx < 4; out_idx = out_idx + 1) begin
+                                    working_state[0][COL_OUT_MAP[qr][out_idx]] <= col_qr_out[qr][out_idx];
+                                end
                             end
+                        end else begin
+                            // Diagonal round results
+                            for (qr = 0; qr < 4; qr = qr + 1) begin
+                                for (out_idx = 0; out_idx < 4; out_idx = out_idx + 1) begin
+                                    working_state[0][DIAG_OUT_MAP[qr][out_idx]] <= diag_qr_out[qr][out_idx];
+                                end
+                            end
+                            
+                            double_round_counter <= double_round_counter + 5'd1;
+                        end
+                        
+                        process_column_round <= ~process_column_round;
+                        
+                        // Finalize after all rounds completed
+                        if (double_round_counter == 5'd5 && !process_column_round) begin
+                            state <= FINALIZE;
                         end
                     end
                 end
                 
                 FINALIZE: begin
-                    // Add initial state to working state for final output
-                    keystream_block[31:0] <= initial_state[0] + working_state[0];
-                    keystream_block[63:32] <= initial_state[1] + working_state[1];
-                    keystream_block[95:64] <= initial_state[2] + working_state[2];
-                    keystream_block[127:96] <= initial_state[3] + working_state[3];
-                    keystream_block[159:128] <= initial_state[4] + working_state[4];
-                    keystream_block[191:160] <= initial_state[5] + working_state[5];
-                    keystream_block[223:192] <= initial_state[6] + working_state[6];
-                    keystream_block[255:224] <= initial_state[7] + working_state[7];
-                    keystream_block[287:256] <= initial_state[8] + working_state[8];
-                    keystream_block[319:288] <= initial_state[9] + working_state[9];
-                    keystream_block[351:320] <= initial_state[10] + working_state[10];
-                    keystream_block[383:352] <= initial_state[11] + working_state[11];
-                    keystream_block[415:384] <= initial_state[12] + working_state[12];
-                    keystream_block[447:416] <= initial_state[13] + working_state[13];
-                    keystream_block[479:448] <= initial_state[14] + working_state[14];
-                    keystream_block[511:480] <= initial_state[15] + working_state[15];
+                    // Calculate final keystream blocks
                     
+                    // Block 0
+                    for (integer w = 0; w < 16; w = w + 1) begin
+                        keystream_blocks[32*w +: 32] <= initial_state[0][w] + working_state[0][w];
+                    end
+                    
+                    // Block 1
+                    if (num_blocks > 1) begin
+                        for (integer w = 0; w < 16; w = w + 1) begin
+                            keystream_blocks[512 + 32*w +: 32] <= initial_state[1][w] + working_state[1][w];
+                        end
+                    end
+
+                    // Block 2
+                    if (num_blocks > 2) begin
+                        for (integer w = 0; w < 16; w = w + 1) begin
+                            keystream_blocks[1024 + 32*w +: 32] <= initial_state[2][w] + working_state[2][w];
+                        end
+                    end
+
+                    // Block 3
+                    if (num_blocks > 3) begin
+                        for (integer w = 0; w < 16; w = w + 1) begin
+                            keystream_blocks[1536 + 32*w +: 32] <= initial_state[3][w] + working_state[3][w];
+                        end
+                    end
+
                     done <= 1'b1;
                     state <= IDLE;
                 end
                 
                 default: begin
-                    state <= IDLE;  // reset IDLE if in an unknown state
+                    state <= IDLE;
                 end
             endcase
         end

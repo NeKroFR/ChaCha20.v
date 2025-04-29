@@ -12,6 +12,10 @@
 `define CHACHA20_BLOCK_SIZE_BYTES 64
 `define CHACHA20_BLOCK_SIZE_WORDS 16
 
+// Word sizes
+`define CHACHA20_WORD_SIZE_BITS 32
+`define CHACHA20_WORD_SIZE_BYTES 4
+
 // Key sizes
 `define CHACHA20_KEY_SIZE_BITS 256
 `define CHACHA20_KEY_SIZE_BYTES 32
@@ -30,4 +34,13 @@
 // Number of rounds
 `define CHACHA20_ROUNDS 20
 
-`endif // CHACHA20_DEFS_VH
+// Parallel processing
+`define CHACHA20_MAX_PARALLEL_BLOCKS 4
+
+// Unrolling factor - how many rounds to implement in hardware
+`define CHACHA20_UNROLL_FACTOR 5  // 5 double-rounds = 10 rounds
+
+// Pipeline stages per round
+`define CHACHA20_PIPELINE_STAGES_PER_ROUND 2
+
+endif // CHACHA20_DEFS_VH

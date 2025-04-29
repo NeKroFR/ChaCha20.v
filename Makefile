@@ -2,7 +2,7 @@ VERILATOR = verilator
 VERILATOR_FLAGS = --cc --assert --trace --top-module chacha20_top --Wno-fatal
 VERILATOR_MAKE = make
 CC = g++
-CFLAGS = -std=c++11 -Wall -g
+CFLAGS = -std=c++11 -Wall -g -O2
 
 # Directories
 VERILOG_SRC_DIR = src/verilog_sources
@@ -22,7 +22,7 @@ OUTPUT_EXE = $(OBJ_DIR)/Vchacha20_top
 # Default target (build and run)
 default: build_tb run
 
-# Build Verilog testbench
+# Build testbench
 build_tb:
 	$(VERILATOR) $(VERILATOR_FLAGS) \
 		-I$(VERILOG_SRC_DIR) -I$(VERILOG_INC_DIR) \
@@ -37,7 +37,11 @@ run: $(OUTPUT_EXE)
 	else \
 		echo "File not found. Please run 'make' to build the project."; \
 	fi
-# if statement does not work :(
+
+# Run testbench
+run_verilog_tb:
+	iverilog -g2012 -I$(VERILOG_INC_DIR) -o tb_chacha20 $(VERILOG_SRCS) $(TESTS_DIR)/tb_chacha20.v
+	vvp tb_chacha20
 
 # Clean build files
 clean:

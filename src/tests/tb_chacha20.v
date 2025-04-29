@@ -10,32 +10,32 @@ module tb_chacha20;
     reg [95:0] nonce;
     
     // Encryption signals
-    reg [7:0] plaintext_data;
+    reg [31:0] plaintext_data;
     reg plaintext_valid;
     reg plaintext_last;
     wire plaintext_ready;
-    wire [7:0] ciphertext_data;
+    wire [31:0] ciphertext_data;
     wire ciphertext_valid;
     wire ciphertext_last;
     reg ciphertext_ready;
     wire encrypt_done;
     
     // Decryption signals
-    reg [7:0] dec_ciphertext_data;
+    reg [31:0] dec_ciphertext_data;
     reg dec_ciphertext_valid;
     reg dec_ciphertext_last;
     wire dec_ciphertext_ready;
-    wire [7:0] dec_plaintext_data;
+    wire [31:0] dec_plaintext_data;
     wire dec_plaintext_valid;
     wire dec_plaintext_last;
     reg dec_plaintext_ready;
     wire decrypt_done;
     
-    // Test data
-    reg [7:0] message [0:23]; // "Very very secret message"
-    reg [7:0] encrypted [0:23];
-    reg [7:0] decrypted [0:23];
-    integer message_length = 24;
+    // Test message "Very very secret message"
+    localparam integer MESSAGE_WORDS = 6; // 24 bytes (6 words)
+    reg [31:0] message [0:MESSAGE_WORDS-1];
+    reg [31:0] encrypted [0:MESSAGE_WORDS-1];
+    reg [31:0] decrypted [0:MESSAGE_WORDS-1];
     integer i;
     
     // DUT instantiation - encryption
@@ -84,13 +84,14 @@ module tb_chacha20;
     
     // Test sequence
     initial begin
-        // Initialize test message
-        message[0] = "V"; message[1] = "e"; message[2] = "r"; message[3] = "y";
-        message[4] = " "; message[5] = "v"; message[6] = "e"; message[7] = "r";
-        message[8] = "y"; message[9] = " "; message[10] = "s"; message[11] = "e";
-        message[12] = "c"; message[13] = "r"; message[14] = "e"; message[15] = "t";
-        message[16] = " "; message[17] = "m"; message[18] = "e"; message[19] = "s";
-        message[20] = "s"; message[21] = "a"; message[22] = "g"; message[23] = "e";
+        // Initialize test message in 32-bit words
+        // "Very very secret message" (24 bytes)
+        message[0] = {8'd'V', 8'd'e', 8'd'r', 8'd'y'}; // "Very"
+        message[1] = {8'd' ', 8'd'v', 8'd'e', 8'd'r'}; // " ver"
+        message[2] = {8'd'y', 8'd' ', 8'd's', 8'd'e'}; // "y se"
+        message[3] = {8'd'c', 8'd'r', 8'd'e', 8'd't'}; // "cret"
+        message[4] = {8'd' ', 8'd'm', 8'd'e', 8'd's'}; // " mes"
+        message[5] = {8'd's', 8'd'a', 8'd'g', 8'd'e'}; // "sage"
         
         // Initialize test signals
         rst_n = 0;
@@ -111,7 +112,7 @@ module tb_chacha20;
         end
         counter = 42; // Arbitrary counter value (beetween 0 and 2^32-1)
         
-        #20 rst_n = 1; // Reset deasserted after 20ns
+        #20 rst_n = 1; // Release reset after 20ns
         
         // Display test parameters
         $display("=== ChaCha20 Encryption/Decryption Test ===");
@@ -127,22 +128,23 @@ module tb_chacha20;
         // Wait for encryption module to be ready
         wait(plaintext_ready);
         
-        // Feed plaintext bytes
-        for (i = 0; i < message_length; i = i + 1) begin
+        // Feed plaintext words
+        for (i = 0; i < MESSAGE_WORDS; i = i + 1) begin
             plaintext_data = message[i];
             plaintext_valid = 1;
-            plaintext_last = (i == message_length - 1);
+            plaintext_last = (i == MESSAGE_WORDS-1);
             
+            // Wait until module is ready for next word
             wait(plaintext_ready);
             
-            // Store encrypted byte
+            // Store encrypted word
             if (ciphertext_valid) begin
                 encrypted[i] = ciphertext_data;
-                $display("Encrypted byte %0d: 0x%02x (ASCII: %c) -> 0x%02x", 
-                         i, message[i], message[i], ciphertext_data);
+                $display("Encrypted word %0d: 0x%08x -> 0x%08x", 
+                         i, message[i], ciphertext_data);
             end
             
-            #10;
+            #10; // wait one cycle before sending next word
         end
         
         plaintext_valid = 0;
@@ -152,12 +154,10 @@ module tb_chacha20;
         #50;
         
         $display("\n=== Encryption completed ===");
-        $display("Encrypted message (hex): ");
-        for (i = 0; i < message_length; i = i + 1) begin
-            $write("%02x ", encrypted[i]);
-            if ((i+1) % 8 == 0) $write("\n");
+        $display("Encrypted message (hex words): ");
+        for (i = 0; i < MESSAGE_WORDS; i = i + 1) begin
+            $display("%d: 0x%08x", i, encrypted[i]);
         end
-        $write("\n");
         
         // Start decryption
         #20 start = 1;
@@ -165,22 +165,23 @@ module tb_chacha20;
         
         wait(dec_ciphertext_ready);
         
-        // Load ciphertext bytes
-        for (i = 0; i < message_length; i = i + 1) begin
+        // Load ciphertext words
+        for (i = 0; i < MESSAGE_WORDS; i = i + 1) begin
             dec_ciphertext_data = encrypted[i];
             dec_ciphertext_valid = 1;
-            dec_ciphertext_last = (i == message_length - 1);
+            dec_ciphertext_last = (i == MESSAGE_WORDS-1);
             
+            // Wait until module is ready for next word
             wait(dec_ciphertext_ready);
             
-            // Store decrypted byte
+            // Store decrypted word
             if (dec_plaintext_valid) begin
                 decrypted[i] = dec_plaintext_data;
-                $display("Decrypted byte %0d: 0x%02x -> 0x%02x (ASCII: %c)", 
-                         i, encrypted[i], dec_plaintext_data, dec_plaintext_data);
+                $display("Decrypted word %0d: 0x%08x -> 0x%08x", 
+                         i, encrypted[i], dec_plaintext_data);
             end
             
-            #10;
+            #10; // wait one cycle before sending next word
         end
         
         dec_ciphertext_valid = 0;
@@ -190,10 +191,29 @@ module tb_chacha20;
         #50;
         
         $display("\n=== Decryption completed ===");
-        $display("Decrypted message: '");
-        for (i = 0; i < message_length; i = i + 1) begin
-            $write("%c", decrypted[i]);
+        $display("Decrypted message (words): ");
+        for (i = 0; i < MESSAGE_WORDS; i = i + 1) begin
+            $display("%d: 0x%08x ASCII: \"%c%c%c%c\"", i, decrypted[i],
+                    decrypted[i][31:24], decrypted[i][23:16], 
+                    decrypted[i][15:8], decrypted[i][7:0]);
         end
-        $display("'");
+        
+        // Verify decryption results
+        reg decryption_correct = 1;
+        for (i = 0; i < MESSAGE_WORDS; i = i + 1) begin
+            if (message[i] != decrypted[i]) begin
+                $display("ERROR at word %0d: Expected 0x%08x, Got 0x%08x", 
+                         i, message[i], decrypted[i]);
+                decryption_correct = 0;
+            end
+        end
+        
+        if (decryption_correct) begin
+            $display("\nSUCCESS: All words correctly decrypted!");
+        } else begin
+            $display("\nERROR: Decryption failed!");
+        end
+        
+        $finish;
     end
 endmodule
