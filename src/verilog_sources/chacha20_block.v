@@ -285,30 +285,24 @@ module chacha20_block #(
                                         // Column round results
                                         for (qr = 0; qr < 4; qr = qr + 1) begin
                                             for (out_idx = 0; out_idx < 4; out_idx = out_idx + 1) begin
-                                                if (qr == 0) begin
-                                                    working_state[blk][out_idx == 0 ? COL_IDX_0_0 : out_idx == 1 ? COL_IDX_0_1 : out_idx == 2 ? COL_IDX_0_2 : COL_IDX_0_3] <= col_qr_out[blk][qr][out_idx];
-                                                end else if (qr == 1) begin
-                                                    working_state[blk][out_idx == 0 ? COL_IDX_1_0 : out_idx == 1 ? COL_IDX_1_1 : out_idx == 2 ? COL_IDX_1_2 : COL_IDX_1_3] <= col_qr_out[blk][qr][out_idx];
-                                                end else if (qr == 2) begin
-                                                    working_state[blk][out_idx == 0 ? COL_IDX_2_0 : out_idx == 1 ? COL_IDX_2_1 : out_idx == 2 ? COL_IDX_2_2 : COL_IDX_2_3] <= col_qr_out[blk][qr][out_idx];
-                                                end else begin
-                                                    working_state[blk][out_idx == 0 ? COL_IDX_3_0 : out_idx == 1 ? COL_IDX_3_1 : out_idx == 2 ? COL_IDX_3_2 : COL_IDX_3_3] <= col_qr_out[blk][qr][out_idx];
-                                                end
+                                                case (qr)
+                                                    0: working_state[blk][out_idx == 0 ? COL_IDX_0_0 : out_idx == 1 ? COL_IDX_0_1 : out_idx == 2 ? COL_IDX_0_2 : COL_IDX_0_3] <= col_qr_out[blk][qr][out_idx];
+                                                    1: working_state[blk][out_idx == 0 ? COL_IDX_1_0 : out_idx == 1 ? COL_IDX_1_1 : out_idx == 2 ? COL_IDX_1_2 : COL_IDX_1_3] <= col_qr_out[blk][qr][out_idx];
+                                                    2: working_state[blk][out_idx == 0 ? COL_IDX_2_0 : out_idx == 1 ? COL_IDX_2_1 : out_idx == 2 ? COL_IDX_2_2 : COL_IDX_2_3] <= col_qr_out[blk][qr][out_idx];
+                                                    3: working_state[blk][out_idx == 0 ? COL_IDX_3_0 : out_idx == 1 ? COL_IDX_3_1 : out_idx == 2 ? COL_IDX_3_2 : COL_IDX_3_3] <= col_qr_out[blk][qr][out_idx];
+                                                endcase
                                             end
                                         end
                                     end else begin
                                         // Diagonal round results
                                         for (qr = 0; qr < 4; qr = qr + 1) begin
                                             for (out_idx = 0; out_idx < 4; out_idx = out_idx + 1) begin
-                                                if (qr == 0) begin
-                                                    working_state[blk][out_idx == 0 ? DIAG_IDX_0_0 : out_idx == 1 ? DIAG_IDX_0_1 : out_idx == 2 ? DIAG_IDX_0_2 : DIAG_IDX_0_3] <= diag_qr_out[blk][qr][out_idx];
-                                                end else if (qr == 1) begin
-                                                    working_state[blk][out_idx == 0 ? DIAG_IDX_1_0 : out_idx == 1 ? DIAG_IDX_1_1 : out_idx == 2 ? DIAG_IDX_1_2 : DIAG_IDX_1_3] <= diag_qr_out[blk][qr][out_idx];
-                                                end else if (qr == 2) begin
-                                                    working_state[blk][out_idx == 0 ? DIAG_IDX_2_0 : out_idx == 1 ? DIAG_IDX_2_1 : out_idx == 2 ? DIAG_IDX_2_2 : DIAG_IDX_2_3] <= diag_qr_out[blk][qr][out_idx];
-                                                end else begin
-                                                    working_state[blk][out_idx == 0 ? DIAG_IDX_3_0 : out_idx == 1 ? DIAG_IDX_3_1 : out_idx == 2 ? DIAG_IDX_3_2 : DIAG_IDX_3_3] <= diag_qr_out[blk][qr][out_idx];
-                                                end
+                                                case (qr)
+                                                    0: working_state[blk][out_idx == 0 ? DIAG_IDX_0_0 : out_idx == 1 ? DIAG_IDX_0_1 : out_idx == 2 ? DIAG_IDX_0_2 : DIAG_IDX_0_3] <= diag_qr_out[blk][qr][out_idx];
+                                                    1: working_state[blk][out_idx == 0 ? DIAG_IDX_1_0 : out_idx == 1 ? DIAG_IDX_1_1 : out_idx == 2 ? DIAG_IDX_1_2 : DIAG_IDX_1_3] <= diag_qr_out[blk][qr][out_idx];
+                                                    2: working_state[blk][out_idx == 0 ? DIAG_IDX_2_0 : out_idx == 1 ? DIAG_IDX_2_1 : out_idx == 2 ? DIAG_IDX_2_2 : DIAG_IDX_2_3] <= diag_qr_out[blk][qr][out_idx];
+                                                    3: working_state[blk][out_idx == 0 ? DIAG_IDX_3_0 : out_idx == 1 ? DIAG_IDX_3_1 : out_idx == 2 ? DIAG_IDX_3_2 : DIAG_IDX_3_3] <= diag_qr_out[blk][qr][out_idx];
+                                                endcase
                                             end
                                         end
                                     end
@@ -338,51 +332,61 @@ module chacha20_block #(
                         // Select inputs for the shared quarter round module
                         if (process_column_round) begin
                             // Column round inputs
-                            if (qr_index == 0) begin
-                                qr_inputs[0] <= working_state[qr_block_index][COL_IDX_0_0];
-                                qr_inputs[1] <= working_state[qr_block_index][COL_IDX_0_1];
-                                qr_inputs[2] <= working_state[qr_block_index][COL_IDX_0_2];
-                                qr_inputs[3] <= working_state[qr_block_index][COL_IDX_0_3];
-                            end else if (qr_index == 1) begin
-                                qr_inputs[0] <= working_state[qr_block_index][COL_IDX_1_0];
-                                qr_inputs[1] <= working_state[qr_block_index][COL_IDX_1_1];
-                                qr_inputs[2] <= working_state[qr_block_index][COL_IDX_1_2];
-                                qr_inputs[3] <= working_state[qr_block_index][COL_IDX_1_3];
-                            end else if (qr_index == 2) begin
-                                qr_inputs[0] <= working_state[qr_block_index][COL_IDX_2_0];
-                                qr_inputs[1] <= working_state[qr_block_index][COL_IDX_2_1];
-                                qr_inputs[2] <= working_state[qr_block_index][COL_IDX_2_2];
-                                qr_inputs[3] <= working_state[qr_block_index][COL_IDX_2_3];
-                            end else begin
-                                qr_inputs[0] <= working_state[qr_block_index][COL_IDX_3_0];
-                                qr_inputs[1] <= working_state[qr_block_index][COL_IDX_3_1];
-                                qr_inputs[2] <= working_state[qr_block_index][COL_IDX_3_2];
-                                qr_inputs[3] <= working_state[qr_block_index][COL_IDX_3_3];
-                            end
+                            case (qr_index)
+                                0: begin
+                                    qr_inputs[0] <= working_state[qr_block_index][COL_IDX_0_0];
+                                    qr_inputs[1] <= working_state[qr_block_index][COL_IDX_0_1];
+                                    qr_inputs[2] <= working_state[qr_block_index][COL_IDX_0_2];
+                                    qr_inputs[3] <= working_state[qr_block_index][COL_IDX_0_3];
+                                end
+                                1: begin
+                                    qr_inputs[0] <= working_state[qr_block_index][COL_IDX_1_0];
+                                    qr_inputs[1] <= working_state[qr_block_index][COL_IDX_1_1];
+                                    qr_inputs[2] <= working_state[qr_block_index][COL_IDX_1_2];
+                                    qr_inputs[3] <= working_state[qr_block_index][COL_IDX_1_3];
+                                end
+                                2: begin
+                                    qr_inputs[0] <= working_state[qr_block_index][COL_IDX_2_0];
+                                    qr_inputs[1] <= working_state[qr_block_index][COL_IDX_2_1];
+                                    qr_inputs[2] <= working_state[qr_block_index][COL_IDX_2_2];
+                                    qr_inputs[3] <= working_state[qr_block_index][COL_IDX_2_3];
+                                end
+                                default: begin // qr_index == 3
+                                    qr_inputs[0] <= working_state[qr_block_index][COL_IDX_3_0];
+                                    qr_inputs[1] <= working_state[qr_block_index][COL_IDX_3_1];
+                                    qr_inputs[2] <= working_state[qr_block_index][COL_IDX_3_2];
+                                    qr_inputs[3] <= working_state[qr_block_index][COL_IDX_3_3];
+                                end
+                            endcase
                             qr_is_diagonal <= 1'b0;
                         end else begin
                             // Diagonal round inputs
-                            if (qr_index == 0) begin
-                                qr_inputs[0] <= working_state[qr_block_index][DIAG_IDX_0_0];
-                                qr_inputs[1] <= working_state[qr_block_index][DIAG_IDX_0_1];
-                                qr_inputs[2] <= working_state[qr_block_index][DIAG_IDX_0_2];
-                                qr_inputs[3] <= working_state[qr_block_index][DIAG_IDX_0_3];
-                            end else if (qr_index == 1) begin
-                                qr_inputs[0] <= working_state[qr_block_index][DIAG_IDX_1_0];
-                                qr_inputs[1] <= working_state[qr_block_index][DIAG_IDX_1_1];
-                                qr_inputs[2] <= working_state[qr_block_index][DIAG_IDX_1_2];
-                                qr_inputs[3] <= working_state[qr_block_index][DIAG_IDX_1_3];
-                            end else if (qr_index == 2) begin
-                                qr_inputs[0] <= working_state[qr_block_index][DIAG_IDX_2_0];
-                                qr_inputs[1] <= working_state[qr_block_index][DIAG_IDX_2_1];
-                                qr_inputs[2] <= working_state[qr_block_index][DIAG_IDX_2_2];
-                                qr_inputs[3] <= working_state[qr_block_index][DIAG_IDX_2_3];
-                            end else begin
-                                qr_inputs[0] <= working_state[qr_block_index][DIAG_IDX_3_0];
-                                qr_inputs[1] <= working_state[qr_block_index][DIAG_IDX_3_1];
-                                qr_inputs[2] <= working_state[qr_block_index][DIAG_IDX_3_2];
-                                qr_inputs[3] <= working_state[qr_block_index][DIAG_IDX_3_3];
-                            end
+                            case (qr_index)
+                                0: begin
+                                    qr_inputs[0] <= working_state[qr_block_index][DIAG_IDX_0_0];
+                                    qr_inputs[1] <= working_state[qr_block_index][DIAG_IDX_0_1];
+                                    qr_inputs[2] <= working_state[qr_block_index][DIAG_IDX_0_2];
+                                    qr_inputs[3] <= working_state[qr_block_index][DIAG_IDX_0_3];
+                                end
+                                1: begin
+                                    qr_inputs[0] <= working_state[qr_block_index][DIAG_IDX_1_0];
+                                    qr_inputs[1] <= working_state[qr_block_index][DIAG_IDX_1_1];
+                                    qr_inputs[2] <= working_state[qr_block_index][DIAG_IDX_1_2];
+                                    qr_inputs[3] <= working_state[qr_block_index][DIAG_IDX_1_3];
+                                end
+                                2: begin
+                                    qr_inputs[0] <= working_state[qr_block_index][DIAG_IDX_2_0];
+                                    qr_inputs[1] <= working_state[qr_block_index][DIAG_IDX_2_1];
+                                    qr_inputs[2] <= working_state[qr_block_index][DIAG_IDX_2_2];
+                                    qr_inputs[3] <= working_state[qr_block_index][DIAG_IDX_2_3];
+                                end
+                                default: begin // qr_index == 3
+                                    qr_inputs[0] <= working_state[qr_block_index][DIAG_IDX_3_0];
+                                    qr_inputs[1] <= working_state[qr_block_index][DIAG_IDX_3_1];
+                                    qr_inputs[2] <= working_state[qr_block_index][DIAG_IDX_3_2];
+                                    qr_inputs[3] <= working_state[qr_block_index][DIAG_IDX_3_3];
+                                end
+                            endcase
                             qr_is_diagonal <= 1'b1;
                         end
                         
@@ -396,50 +400,60 @@ module chacha20_block #(
                             // Store quarter round results
                             if (qr_is_diagonal) begin
                                 // Update diagonal round results
-                                if (qr_index == 0) begin
-                                    working_state[qr_block_index][DIAG_IDX_0_0] <= qr_outputs[0];
-                                    working_state[qr_block_index][DIAG_IDX_0_1] <= qr_outputs[1];
-                                    working_state[qr_block_index][DIAG_IDX_0_2] <= qr_outputs[2];
-                                    working_state[qr_block_index][DIAG_IDX_0_3] <= qr_outputs[3];
-                                end else if (qr_index == 1) begin
-                                    working_state[qr_block_index][DIAG_IDX_1_0] <= qr_outputs[0];
-                                    working_state[qr_block_index][DIAG_IDX_1_1] <= qr_outputs[1];
-                                    working_state[qr_block_index][DIAG_IDX_1_2] <= qr_outputs[2];
-                                    working_state[qr_block_index][DIAG_IDX_1_3] <= qr_outputs[3];
-                                end else if (qr_index == 2) begin
-                                    working_state[qr_block_index][DIAG_IDX_2_0] <= qr_outputs[0];
-                                    working_state[qr_block_index][DIAG_IDX_2_1] <= qr_outputs[1];
-                                    working_state[qr_block_index][DIAG_IDX_2_2] <= qr_outputs[2];
-                                    working_state[qr_block_index][DIAG_IDX_2_3] <= qr_outputs[3];
-                                end else begin
-                                    working_state[qr_block_index][DIAG_IDX_3_0] <= qr_outputs[0];
-                                    working_state[qr_block_index][DIAG_IDX_3_1] <= qr_outputs[1];
-                                    working_state[qr_block_index][DIAG_IDX_3_2] <= qr_outputs[2];
-                                    working_state[qr_block_index][DIAG_IDX_3_3] <= qr_outputs[3];
-                                end
+                                case (qr_index)
+                                    0: begin
+                                        working_state[qr_block_index][DIAG_IDX_0_0] <= qr_outputs[0];
+                                        working_state[qr_block_index][DIAG_IDX_0_1] <= qr_outputs[1];
+                                        working_state[qr_block_index][DIAG_IDX_0_2] <= qr_outputs[2];
+                                        working_state[qr_block_index][DIAG_IDX_0_3] <= qr_outputs[3];
+                                    end
+                                    1: begin
+                                        working_state[qr_block_index][DIAG_IDX_1_0] <= qr_outputs[0];
+                                        working_state[qr_block_index][DIAG_IDX_1_1] <= qr_outputs[1];
+                                        working_state[qr_block_index][DIAG_IDX_1_2] <= qr_outputs[2];
+                                        working_state[qr_block_index][DIAG_IDX_1_3] <= qr_outputs[3];
+                                    end
+                                    2: begin
+                                        working_state[qr_block_index][DIAG_IDX_2_0] <= qr_outputs[0];
+                                        working_state[qr_block_index][DIAG_IDX_2_1] <= qr_outputs[1];
+                                        working_state[qr_block_index][DIAG_IDX_2_2] <= qr_outputs[2];
+                                        working_state[qr_block_index][DIAG_IDX_2_3] <= qr_outputs[3];
+                                    end
+                                    default: begin // qr_index == 3
+                                        working_state[qr_block_index][DIAG_IDX_3_0] <= qr_outputs[0];
+                                        working_state[qr_block_index][DIAG_IDX_3_1] <= qr_outputs[1];
+                                        working_state[qr_block_index][DIAG_IDX_3_2] <= qr_outputs[2];
+                                        working_state[qr_block_index][DIAG_IDX_3_3] <= qr_outputs[3];
+                                    end
+                                endcase
                             end else begin
                                 // Update column round results
-                                if (qr_index == 0) begin
-                                    working_state[qr_block_index][COL_IDX_0_0] <= qr_outputs[0];
-                                    working_state[qr_block_index][COL_IDX_0_1] <= qr_outputs[1];
-                                    working_state[qr_block_index][COL_IDX_0_2] <= qr_outputs[2];
-                                    working_state[qr_block_index][COL_IDX_0_3] <= qr_outputs[3];
-                                end else if (qr_index == 1) begin
-                                    working_state[qr_block_index][COL_IDX_1_0] <= qr_outputs[0];
-                                    working_state[qr_block_index][COL_IDX_1_1] <= qr_outputs[1];
-                                    working_state[qr_block_index][COL_IDX_1_2] <= qr_outputs[2];
-                                    working_state[qr_block_index][COL_IDX_1_3] <= qr_outputs[3];
-                                end else if (qr_index == 2) begin
-                                    working_state[qr_block_index][COL_IDX_2_0] <= qr_outputs[0];
-                                    working_state[qr_block_index][COL_IDX_2_1] <= qr_outputs[1];
-                                    working_state[qr_block_index][COL_IDX_2_2] <= qr_outputs[2];
-                                    working_state[qr_block_index][COL_IDX_2_3] <= qr_outputs[3];
-                                end else begin
-                                    working_state[qr_block_index][COL_IDX_3_0] <= qr_outputs[0];
-                                    working_state[qr_block_index][COL_IDX_3_1] <= qr_outputs[1];
-                                    working_state[qr_block_index][COL_IDX_3_2] <= qr_outputs[2];
-                                    working_state[qr_block_index][COL_IDX_3_3] <= qr_outputs[3];
-                                end
+                                case (qr_index)
+                                    0: begin
+                                        working_state[qr_block_index][COL_IDX_0_0] <= qr_outputs[0];
+                                        working_state[qr_block_index][COL_IDX_0_1] <= qr_outputs[1];
+                                        working_state[qr_block_index][COL_IDX_0_2] <= qr_outputs[2];
+                                        working_state[qr_block_index][COL_IDX_0_3] <= qr_outputs[3];
+                                    end
+                                    1: begin
+                                        working_state[qr_block_index][COL_IDX_1_0] <= qr_outputs[0];
+                                        working_state[qr_block_index][COL_IDX_1_1] <= qr_outputs[1];
+                                        working_state[qr_block_index][COL_IDX_1_2] <= qr_outputs[2];
+                                        working_state[qr_block_index][COL_IDX_1_3] <= qr_outputs[3];
+                                    end
+                                    2: begin
+                                        working_state[qr_block_index][COL_IDX_2_0] <= qr_outputs[0];
+                                        working_state[qr_block_index][COL_IDX_2_1] <= qr_outputs[1];
+                                        working_state[qr_block_index][COL_IDX_2_2] <= qr_outputs[2];
+                                        working_state[qr_block_index][COL_IDX_2_3] <= qr_outputs[3];
+                                    end
+                                    default: begin // qr_index == 3
+                                        working_state[qr_block_index][COL_IDX_3_0] <= qr_outputs[0];
+                                        working_state[qr_block_index][COL_IDX_3_1] <= qr_outputs[1];
+                                        working_state[qr_block_index][COL_IDX_3_2] <= qr_outputs[2];
+                                        working_state[qr_block_index][COL_IDX_3_3] <= qr_outputs[3];
+                                    end
+                                endcase
                             end
                             
                             // Move to the next quarter round
